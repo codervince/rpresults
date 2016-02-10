@@ -7,16 +7,21 @@
 
 import scrapy
 
+## META DATA
 class VenueItem(scrapy.Item):
-    racecourseid= scrapy.Field()
-    racecoursename= scrapy.Field()
-    racecoursedir= scrapy.Field()
-    racecourseshape= scrapy.Field()
-    racecoursefeature= scrapy.Field()
-    racecoursespeed= scrapy.Field()
+    venueid= scrapy.Field()
+    name= scrapy.Field()
+    code= scrapy.Field()
+    direction= scrapy.Field()
+    shape= scrapy.Field()
+    feature= scrapy.Field()
+    speed= scrapy.Field()
+    grade = scrapy.Field()
 
 class HorseItem(scrapy.Item):
     horsename= scrapy.Field()
+    horseid= scrapy.Field()
+    horseurl= scrapy.Field()
     breeder = scrapy.Field()
     horseid = scrapy.Field()
     sex= scrapy.Field()
@@ -52,6 +57,7 @@ class RaceItem(scrapy.Item):
     agerestriction= scrapy.Field()
     norunners= scrapy.Field()
     paceinfo= scrapy.Field()
+    winnerid = scrapy.Field()
 
 class LTOItem(scrapy.Item):
     raceid = scrapy.Field()

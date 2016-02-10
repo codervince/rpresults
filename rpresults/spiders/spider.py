@@ -3,7 +3,7 @@ import re
 from scrapy.contrib.spiders import Rule, CrawlSpider
 from scrapy.contrib.linkextractors import LinkExtractor
 from scrapy.contrib.loader import ItemLoader
-from scrapy.contrib.loader.processor import TakeFirst, Compose, Join, MapCompose
+from scrapy.contrib.loader.processor import TakeFirst, Compose, Join, MapCompose, Identity
 from scrapy.http import Request
 from scrapy import log
 import decimal
@@ -15,10 +15,9 @@ import logging
 from time import sleep
 from fractions import Fraction
 import unicodedata
+from collections import defaultdict
 # import numpy
-#test for one date
-#then adapt to accept a list of raceurls
-#or generate a series of dates csv
+
 
 dir_pat = re.compile("^.*(left|right)-handed.*")
 rcspeed_pat = re.compile("^.*(galloping|stiff|tight).*")
@@ -241,6 +240,7 @@ class RaceItemLoader(ItemLoader):
     default_item_class = RaceItem
     default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
 
+
 # from rpost.items import RpostResultsItem
 class ResultsItemLoader(ItemLoader):
     default_item_class = ResultsItem
@@ -276,6 +276,8 @@ class ResultsItemLoader(ItemLoader):
     L5comment_out = Compose(default_output_processor, removeunichars)
     L6comment_out = Compose(default_output_processor, removeunichars)
     currentodds_out = Compose(default_output_processor, decimalizeodds)
+    horse_out = Identity()
+    horse_in = Identity()
 
 
 class RpostSpider(scrapy.Spider):
@@ -290,6 +292,7 @@ class RpostSpider(scrapy.Spider):
     #rules horses http://www.racingpost.com/horses/horse_home.sd?horse_id=871316
     def __init__(self, date=None, filename=None):
         self.forbiddencountries = ['NZ', 'AUS']
+        self.AUScourseids = [980,1022,629,311,821,517,480,471]
         self.todaysvenues = {}
         self.racedate = datetime.utcnow().date()
         if filename:
@@ -320,17 +323,19 @@ class RpostSpider(scrapy.Spider):
             todaysnames = response.xpath("//h3//a[contains(@title, 'Course')]//text()").extract()
             todaysdate = response.url.split("=")[1]
             print todaysdate
-            self.racedate = datetime.strptime(todaysdate, '%Y-%m-%d') #2016-02-06
+            self.racedate = datetime.strptime(todaysdate, '%Y-%m-%d').date() #2016-02-06
+            crsid = None
             for n,l in zip(todaysnames, todayscourses):
-                crsid = None
+                print("n,l:\t", n, l)
                 if re.match(racecourseid_pat, l):
                     crsid = re.match(racecourseid_pat, l).group(1)
-                self.todaysvenues[n.upper().strip()] = crsid
-
-            badracecourse = 'Dummy'
-            if re.match(badracecoursename_pat, title):
-                badracecourse = re.match(badracecoursename_pat, title).group(1)
-            if badracecourse =='AUS' or badracecourse =='NZ':
+                    # print("crsid:\t", crsid)
+                    if n == 'SANDOWN (AUS) (AUS)':
+                        n = 'SANDOWN (AUS)'
+                    rc = n.upper().strip()
+                self.todaysvenues[rc] = crsid
+                # SANDOWN (AUS)
+            if crsid in self.AUScourseids:
                 yield Request(response.url, dont_filter=True)
             else:
                 for link in LinkExtractor(restrict_xpaths="//a[contains(@title,'View full result')]",).extract_links(response)[:-1]:
@@ -370,7 +375,25 @@ class RpostSpider(scrapy.Spider):
             print("\n")
             ##RESULTS GRID
             norunners = float(response.xpath("count(//table[contains(@class,'resultRaceGrid')]//tbody//tr[@data-hid])").extract()[0])
-            print("norunners", norunners)
+            # print("norunners", norunners)
+            runnerslist = response.xpath("//table[contains(@class,'resultRaceGrid')]//tbody//tr[@data-hid]//td[4]/span/b/a/@href").extract()
+            alllbws = response.xpath("//table[contains(@class,'resultRaceGrid')]//tbody//tr[@data-hid]//td[4]/span/b/a/@href/../../../../../td[3]/text()").extract()
+            runnerlbws = defaultdict(list)
+            for i, (ru,l) in enumerate(zip(runnerslist, alllbws)):
+                vallist = []
+                if re.match(horseid_pat, ru):
+                    horseid = re.match(horseid_pat, ru).group(1)
+                    vallist.append(horseid)
+                    vallist.append( clean_lbwresult(l) )
+                    runnerlbws[str(i)] = vallist
+
+            if len(runnerlbws) >1:
+                print("runnerlbws---------->")
+                print(runnerlbws)
+                winninghorse = runnerlbws['0'][0]
+                winninglbw = -1* float(runnerlbws['1'][1])
+                print "winninghorse and lbw: \n"
+                print (winninghorse, winninglbw)
             # alllbws_ = response.xpath("//table[contains(@class, 'resultRaceGrid')]/tbody/tr[@data-hid]//td[3]//text()").extract()
             # alllbws = [clean_lbwresult(x) for x in alllbws_]
             # if alllbws:
@@ -386,8 +409,8 @@ class RpostSpider(scrapy.Spider):
                 j = JockeyItemLoader(item=JockeyItem(), response=response)
                 t = TrainerItemLoader(item=TrainerItem(), response=response)
 
-                v.add_value('racecourseid', racecourseid)
-                v.add_value('racecoursename', racecoursename)
+                v.add_value('venueid', racecourseid)
+                v.add_value('name', racecoursename)
                 # l.add_value('racetitle', racetitle)
 
                 ### RACEITEM
@@ -475,60 +498,8 @@ class RpostSpider(scrapy.Spider):
                 t.add_value('trainerid', trainerid)
                 j.add_value('jockeyname', jockeyname)
                 j.add_value('jockeyid', jockeyid)
-            # d = response.url.split("_")
-            # l.add_value('racedate', ''.join([ i for i in d[-2] if i.isdigit()]))
-            # l.add_value('rpraceid', ''.join([ i for i in d[-1] if i.isdigit()]))
-            # racecourse = response.xpath('//title').extract()[0].split('|')[0].strip().split("At ")[-1]
-            # l.add_value('racecourse', racecourse)
-            # if u'(AW)' in racecourse:
-            #     l.add_value('surface', 'AWT')
-            # else:
-            #     l.add_value('surface', 'Turf')
-            # l.add_value('racetime', response.xpath('//title/text()').extract()[0].split('|')[0].strip().split(" Race")[0].replace("Results From The ", ""))
-            # # l.add_value('racename', response.xpath("//h3[@class='clearfix']/text()").extract()[0].strip())
-            # #race number?
-            # #race name, racetype
-            #
-            # racedetails = response.xpath("//div[@class='leftColBig']/ul/li/text()")
-            # l.add_value("raceclass", racedetails.extract()[0].split('\n')[1].replace("(", '').replace(")", "").strip())
-            # l.add_value("raceratingspan", racedetails.extract()[0].split('\n')[2].split(",")[0].replace("(", "").replace(")", "").strip())
-            # l.add_value("agerestriction", racedetails.extract()[0].split('\n')[2].split(")")[0].split(",")[-1].replace("(", "").strip())
-            # l.add_value("imperialdistance", racedetails.extract()[0].split('\n')[2].split(" ")[-1].replace("(", "").replace(")", ""))
-            # item['racedate'] = ''.join([ i for i in d[-2] if i.isdigit()]) #yyyymmdd
-            # item['rpraceid'] = ''.join([ i for i in d[-1] if i.isdigit()])
 
-            # # response.xpath('//title').extract()[0].split('|')[0].strip()
-            # item['racecourse'] = response.xpath('//title').extract()[0].split('|')[0].strip().split("At ")[-1]
-            # item['racetime'] = response.xpath('//title/text()').extract()[0].split('|')[0].strip().split(" Race")[0].replace("Results From The ", "")
-
-            # #raceinfo
-            # race = response.xpath("//div[@class='leftColBig']").extract()
-            # # racename = response.xpath("//div[@class='leftColBig']/h3/text()").extract()[0].strip()
-
-            # # [u'', u' (Class 4) ', u' (0-105, 4yo+) (2m110y)', u' ', u' 2m\xbdf Good 8 hdles ']
-            # response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[0].split('\n')
-            # item['raceclass'] = response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[0].split('\n')[1].replace("(", '').replace(")", "").strip()
-
-            # # u' (0-105, 4yo+) (2m110y)' ratingband agerestrictin (imperialdistance mfy)
-            # racedata = response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[0].split('\n')[2]
-            # item['ratingband'] = response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[0].split('\n')[2].split(",")[0].replace("(", "").replace(")", "").strip()
-            # item['agerestriction'] = response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[0].split('\n')[2].split(")")[0].split(",")[-1].replace("(", "").strip()
-            # item['imperialdistance'] = response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[0].split('\n')[2].split(" ")[-1].replace("(", "").replace(")", "")
-            # pprint.pprint(l.load_item())
-            # # #prizemoney
-            # # prized = {}
-            # pm = response.xpath("//div[@class='leftColBig']/ul/li/text()").extract()[1].split('\n')
-            # pms = [i.encode('ascii', 'ignore') for i in pm]
-            # pms2 = pms[0].split(', ')
-            # pms = [ decimal.Decimal(i.replace(',','')) for i in pms2]
-            # pms.sort() #inline
-            # # for k, prize in enumerate(sorted(pms, reverse=True)):
-            # #     l.add_value('pm'+ str(k+1), prize)
-            #     # prized[str(i+1)] = prize
-            # l.add_value('prizemoney', sum(pms))
-
-            # #raceinfo
-            ri = response.xpath("//div[@class='raceInfo']")
+                # ri = response.xpath("//div[@class='raceInfo']")
             # l.add_value("runners", ri.xpath("b[text()[contains(.,'ran')]]/text()").extract()[0].strip().replace("ran", "").strip())
             # l.add_value("paceinfo", ri.xpath("b[text()[contains(.,'TIME')]]/following-sibling::text()").extract()[0].strip() )
             #format 3m 58.40s (slow by 7.40s) '
@@ -537,58 +508,49 @@ class RpostSpider(scrapy.Spider):
             # l.add_value("racereport", " ".join(response.xpath("//div[@id='ANALYSIS']").extract()) )
 
             ###NESTED
-            ra_item = r.load_item()
-            ra_item['venue'] = v.load_item()
-            l_item = l.load_item()
-            l_item['jockey'] = j.load_item()
-            l_item['trainer'] = t.load_item()
-            l_item['n1race'] = nto.load_item()
-            l_item['l1race'] = lto.load_item()
-            i = l.load_item()
-            table_data.append(i)
-            # yield i
-            for link in LinkExtractor(restrict_xpaths="//a[contains(@href,'horse_id')]/..", deny=( [r'.*/stallion/.*', r'.*/dam/.*' ]) ).extract_links(response):
-                yield Request(link.url, callback=self.parse_horse, meta=dict(table_data=table_data))
-
-        # yield item
-            #the horses
-
-            # for i, r in enumerate(response.xpath("//table/tbody")):
-            #     #tds - blank horsenumber, lbw, horsename country sp (td span a), age, carrierWt, OR, TS , OPR,  RATED
-            #     #if * then not logged in!
-            #     position
-            #     lbw
-            #     horse_id
-            #     horsename
-            #     horsecountry
-            #     sp = winodds
-            #     age
-            #     weight
-            #     trainername
-            #     OR
-            #     TS
-            #     RPR
-            #     jockeyname
-            #     commentText
-
-
-    ##NATCH HORSE WITH CORRECT ENTRY IN TABLE DATA
-    ##NOT MATCHING UP!
+                ra_item = r.load_item()
+                ra_item['venue'] = v.load_item()
+                l_item = l.load_item()
+                l_item['race'] = ra_item
+                l_item['jockey'] = j.load_item()
+                l_item['trainer'] = t.load_item()
+                l_item['n1race'] = nto.load_item()
+                l_item['l1race'] = lto.load_item()
+                # table_data.append(i)
+                # yield i
+                # for link in LinkExtractor(restrict_xpaths="//a[contains(@href,'horse_id')]/..", deny=( [r'.*/stallion/.*', r'.*/dam/.*' ]) ).extract_links(response):
+                #     yield Request(link.url, callback=self.parse_horse, meta=dict(table_data=table_data))
+                #do per horse
+                if horseurl:
+                    yield Request(
+                    horseurl,
+                    callback=self.parse_horse,
+                    meta={
+                        'item': l_item
+                    }
+                    )
 
     def parse_horse(self, response):
-        table_data = response.meta["table_data"]
-        pprint.pprint("tabledata:\n")
-        print(table_data[0])
+
+        l = ResultsItemLoader(item=ResultsItem(response.meta['item']), response=response)
+
+        # table_data = response.meta["table_data"]
+        # pprint.pprint("tabledata:\n")
+        # print(table_data[0])
         # item = items.RpostResultsItem()
-        l = ResultsItemLoader()
-        l.add_value(None,table_data[0])
+        # l = ResultsItemLoader()
+        # l.add_value(None,table_data[0])
 
         #now HorseItem
-        hl = HorseItemLoader()
+        hl = HorseItemLoader(item=HorseItem(), response=response)
         owners_ = ";".join( response.xpath("//ul[@id='detailedInfo']/li[contains(text(), 'Owner')]/b//text()").extract())
         owners = tf(owners_.strip().split(";"))
         hl.add_value("owners", owners)
-
+        horseurl = response.url
+        hl.add_value("horseurl", horseurl)
+        if re.match(horseid_pat, horseurl):
+            horseid = re.match(horseid_pat, horseurl).group(1)
+            hl.add_value("horseid", horseid)
         details = response.xpath("//ul[@id='detailedInfo']")
         hdetails= details.xpath("//li/b/text()").extract()[0].strip() #format u'4-y-o (19Apr11 b f)'
         # age = re.split('-y-o', details)
@@ -614,13 +576,7 @@ class RpostSpider(scrapy.Spider):
         hl.add_value("breeder",details.xpath("//li[text()[contains(.,'Breeder')]]/b/text()").extract()[0].strip())
 
 
-        #SALES
-        # horse_sales  = response.xpath("//div[@id='horse_sales']/table")
-        # if horse_sales:
-            #get totals in PRICE COLUMN AND CURRENCY --> MONEY
-            #field totalsales
-        #combine these
-        # print "updated\n"
-        i = l.load_item()
-        i['horse'] = hl.load_item()
-        yield i
+        # l['horse'] = hl.load_item()
+        l.add_value('horse', hl.load_item() )
+        # yield hl.load_item()
+        yield l.load_item()
