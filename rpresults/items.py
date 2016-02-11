@@ -44,7 +44,13 @@ class RaceItem(scrapy.Item):
     raceid = scrapy.Field()
     raceurl = scrapy.Field()
     racedate= scrapy.Field()
+    season= scrapy.Field()
     racename= scrapy.Field()
+    isfemalerace= scrapy.Field()
+    isclaiming= scrapy.Field()
+    isselling= scrapy.Field()
+    isclassified= scrapy.Field()
+    specialrace = scrapy.Field()
     racecourse= scrapy.Field()
     raceclass= scrapy.Field()
     racetime = scrapy.Field()
@@ -57,7 +63,8 @@ class RaceItem(scrapy.Item):
     agerestriction= scrapy.Field()
     norunners= scrapy.Field()
     paceinfo= scrapy.Field()
-    winnerid = scrapy.Field()
+    winninghorse = scrapy.Field()
+    winningprize = scrapy.Field()
 
 class LTOItem(scrapy.Item):
     raceid = scrapy.Field()
@@ -85,17 +92,24 @@ class ResultsItem(scrapy.Item):
 
     trainer = scrapy.Field()
     trainerid = scrapy.Field()
-
+    allowance = scrapy.Field()
 
     pos= scrapy.Field()
     lbw= scrapy.Field()
     sp= scrapy.Field()
     draw = scrapy.Field()
+    winodds = scrapy.Field()
+    winoddsrank = scrapy.Field()
     raceComments= scrapy.Field()
 
     tippedby = scrapy.Field()
+    isFROY= scrapy.Field()
     l1race = scrapy.Field()
     l1raceid = scrapy.Field()
-
+    l1pos = scrapy.Field()
+    l1racecoursecode= scrapy.Field()
+    trainerchangel1= scrapy.Field()
+    isMaiden = scrapy.Field()
+    previousstarts = scrapy.Field()
     n1raceid = scrapy.Field()
     n1race = scrapy.Field()
