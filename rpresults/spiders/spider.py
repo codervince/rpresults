@@ -30,6 +30,7 @@ spl1_pat = re.compile("\D*(\d{1,4}/\d{1,2})")
 sp_pat = re.compile("\D*(\d{1,4}/\d{1,2})[FCJ]{0,1}")
 # (USA) 27/10F
 raceidpat = re.compile(r'.*race_id=(\d+).*') #?
+norunners_pat = re.compile(r'^\\(\d+).*')
 
 # patterns for horse, trainer, jockey,race, course id
 raceid_pat = re.compile(r'.*race_id=(\d+).*')
@@ -44,6 +45,17 @@ nzaus_pat = re.compile("\D*\s\((NZ|AUS)\)\sResult.*")
 badracecoursename_pat = re.compile(".*\((\D+)\)\sResult.*")
 racecoursename_pat = re.compile("(\D*)\sResult.*")
 raceclass_pat = re.compile(r'.*C(\d{1}).*')
+
+def getracetypeLn(raceconditions):
+    # C3NvHcCh 7K
+    rtpat1 = re.compile(r'.*C[0-9]{1}(2yM|2yHc|3yHc|2yL|2yG3|3y|L|3y|2y|NHF|NHFL|HcCh|Ch|HL|H|HcHL|NvChG2|NvChG1|NvHG2|NvCh|ChL|PTP|4yMdPTP|4yPTP)\s.*')
+    rtpat2 = re.compile(r'(2yM|2yHc|3yHc|2yL|2yG3|3y|L|3y|2y|NHF|NHFL|HcCh|Ch|HL|H|HcHL|NvChG2|NvChG1|NvHG2|NvCh|ChL|PTP|4yMdPTP|4yPTP)\s(\d+)K.*')
+    regexes = [rtpat1, rtpat2]
+    res = ""
+    for regex in regexes:
+        if re.match(regex, raceconditions):
+            res += re.match(regex, raceconditions).group(1)
+    return res
 
 def getseason(d):
     yr = d.year
@@ -397,6 +409,8 @@ class RpostSpider(scrapy.Spider):
             # print todaysdate
             self.racedate = datetime.strptime(todaysdate, '%Y-%m-%d').date() #2016-02-06
             crsid = None
+
+
             for n,l in zip(todaysnames, todayscourses):
                 if re.match(racecourseid_pat, l):
                     crsid = re.match(racecourseid_pat, l).group(1)
@@ -408,12 +422,22 @@ class RpostSpider(scrapy.Spider):
                 self.todaysvenues[rc] = crsid
                 ##WRITE THIS OUT TO CSV
                 # SANDOWN (AUS)
-            if crsid in self.AUScourseids:
-                yield Request(response.url, dont_filter=True)
-            else:
-                for link in LinkExtractor(restrict_xpaths="//a[contains(@title,'View full result')]",).extract_links(response)[:-1]:
+            # if crsid in self.AUScourseids:
+            #     yield Request(response.url, dont_filter=True)
+            # else:
+            thisrcpath = " ".join(response.xpath("//a[contains(text(), '(AUS)')]/text()").extract())
+            print("--------\n")
+            print(thisrcpath)
+            for link in LinkExtractor(
+                restrict_xpaths=([
+                "//a[contains(@title,'View full result')]",
+                # "//a[not(contains(text(), '(AUS)'))]",
+                # "//a[not(contains(text(), '(CHI)'))]",
+                # "//a[not(contains(text(), '(USA)'))]"
+                 ] )
+                ).extract_links(response)[:-1]:
                     # yield Request(link.url)
-                    yield Request(link.url, callback=self.parse_race)
+                yield Request(link.url, callback=self.parse_race)
 
 
     def parse_race(self, response):
@@ -430,7 +454,7 @@ class RpostSpider(scrapy.Spider):
             if re.match(racecoursename_pat, racetitle):
                 racecoursename = re.match(racecoursename_pat, racetitle).group(1)
                 # no KeyError: u'ASCOT (AUS)'
-                racecourseid = self.todaysvenues[racecoursename.upper().strip()]
+                racecourseid = self.todaysvenues.get( racecoursename.upper().strip(), None)
 
             racetime = " ".join(response.xpath("//span[@class='timeNavigation']/text()").extract()).strip()
             racename = " ".join(response.xpath("//h3[@class='clearfix']/text()").extract()).strip()
@@ -544,7 +568,7 @@ class RpostSpider(scrapy.Spider):
                     l1raceurl = tr.xpath("td[1]/a/@href").extract()[0]
                     if re.match(raceid_pat, l1raceurl):
                         l1raceid = re.match(raceid_pat, l1raceurl).group(1)
-                l.add_value('l1raceid', l1raceid)
+                # lto.add_value('l1raceid', l1raceid)
                 lto.add_value('raceid', l1raceid)
                 ##n1
                 n1raceid = None
@@ -552,7 +576,7 @@ class RpostSpider(scrapy.Spider):
                     n1raceurl = tr.xpath("td[@class='last'][2]/a/@href").extract()[0]
                     if re.match(raceid_pat, n1raceurl):
                         n1raceid = re.match(raceid_pat, n1raceurl).group(1)
-                l.add_value('n1raceid', n1raceid)
+                # l.add_value('n1raceid', n1raceid)
                 nto.add_value('raceid', n1raceid)
 
                 pos = tr.xpath("td[2]/h3/text()").extract()[0]
@@ -615,6 +639,7 @@ class RpostSpider(scrapy.Spider):
                     l.add_value('winoddsrank', oddsranks[hdx])
                 except IndexError:
                     l.add_value('winoddsrank', None)
+
                 l.add_value('horseid', horseid)
                 l.add_value('horsename', horsename)
                 l.add_value('trainerid', trainerid)
@@ -640,8 +665,8 @@ class RpostSpider(scrapy.Spider):
                 l_item['race'] = ra_item
                 l_item['jockey'] = j.load_item()
                 l_item['trainer'] = t.load_item()
-                l_item['n1race'] = nto.load_item()
-                l_item['l1race'] = lto.load_item()
+                l_item['prevnextrace'] = [ lto.load_item(), nto.load_item() ]
+
                 # table_data.append(i)
                 # yield i
                 # for link in LinkExtractor(restrict_xpaths="//a[contains(@href,'horse_id')]/..", deny=( [r'.*/stallion/.*', r'.*/dam/.*' ]) ).extract_links(response):
@@ -655,7 +680,13 @@ class RpostSpider(scrapy.Spider):
                         'item': l_item
                     }
                     )
-
+    #USE EXACT SAME CODE FOR RACEDAY
+    '''
+    Get metadata about horse
+    do AGGREGATE ON FLY
+    need todays INFO
+    #RACEDAY MAY HAVE EXISTING RACES
+    '''
     def parse_horse(self, response):
         ## TOTAL EARNINGS EPS_CODE EPS_TOTAL
         ## Hwt ia todays code?
@@ -735,29 +766,86 @@ class RpostSpider(scrapy.Spider):
             todaysracecoursecode = l.get_value('racecoursecode')
             ln = 0
             nowins = 0
+            previousraces = defaultdict(dict)
+            # index raceid racestats + position
             for tr in response.xpath("//div[@id='horse_form']/table[@class='grid']//tr[@id]"):
                 lnracedate_ = tr.xpath("td[1]/a/text()").extract()[0]
                 lnracedate = datetime.strptime(lnracedate_, "%d%b%y").date()
                 if self.racedate > lnracedate:
+                    #new race dict
+                    thisrace = {}
                     #isFROY
                     l.add_value('isFROY', isFROY( (self.racedate- lnracedate).days))
                     ln = ln+1
-                    lnpos  =  tr.xpath("td[4]/b[@class='black']/text()").extract()[0]
-                    if lnpos == '1':
-                        nowins = nowins+1
+                    lnracehref = tr.xpath("td[1]/a/@href").extract()[0]
                     lnrc = tr.xpath("td[2]/b/a/text()").extract()[0]
                     lndistancegoing= " ".join(tr.xpath("td[2]/b/text()").extract()).strip()
                     lnraceconditions=  " ".join(tr.xpath("td[2]/text()").extract()).strip()
-                    print("lnraceconditoms", lnraceconditions)
+                    lnspgear = " ".join(tr.xpath("td[4]/a/following-sibling::text()").extract()).strip()
+                    lnpos  =  tr.xpath("td[4]/b[@class='black']/text()").extract()[0]
+                    lnrunnersslbw_ = " ".join( tr.xpath("td[4]/text()").extract())
+                    lnracecomment = " ".join( tr.xpath("td[4]/a/@title").extract())
+                    #J may be missing
+                    lnjockey = None
+                    lnjockeyhref = None
+                    if tr.xpath("td[5]/a/text()").extract():
+                        lnjockey = tr.xpath("td[5]/a/text()").extract()[0]
+                        lnjockeyhref = tr.xpath("td[5]/a/@href").extract()[0]
+                    lnjid = None
+                    if lnjockeyhref and re.match(jockeyid_pat, lnjockeyhref):
+                        lnjid = re.match(jockeyid_pat, lnjockeyhref).group(1)
+                    lnraceid = None
+                    if re.match(raceid_pat, lnracehref):
+                        lnraceid = re.match(raceid_pat, lnracehref).group(1)
+
+                    # print("lnjockey--->id", lnjockey, lnjid)
+                    lnrunners = None
+                    if re.match(norunners_pat, lnrunnersslbw_):
+                        lnrunners = re.match(norunners_pat, lnrunnersslbw_).group(1)
+                    lnsp = None
+                    lngear = None
+                    if re.match(spl1_pat, lnspgear):
+                        lnsp_ = re.match(spl1_pat, lnspgear).group(1)
+                        lnsp = decimalizeodds(lnsp_)
+                    if re.match(gearl1_pat, lnspgear):
+                        lngear = re.match(gearl1_pat, lnspgear).group(1).strip()
                     lndist = None
                     lngoing = None
                     lnraceclass= None
+                    lnracetype = getracetypeLn(lnraceconditions)
                     if re.match(raceclass_pat, lnraceconditions):
                         lnraceclass = re.match(raceclass_pat, lnraceconditions).group(1)
                     if re.match(dgr_pat, lndistancegoing):
                         lndist = re.match(dgr_pat, lndistancegoing).group(1)
                         lngoing = re.match(dgr_pat, lndistancegoing).group(2)
-                    print ("lnracedate, lnpos, lnrc, dist, going, raceclass", lnracedate, lnpos, lnrc,lndist,lngoing,lnraceclass)
+                    if lnraceid:
+                        thisrace['jockey'] = lnjockey
+                        thisrace['jockeyid'] = lnjid
+                        thisrace['pos'] = lnpos
+                        thisrace['going'] = lnrunners
+                        thisrace['racecourse'] = lnrc
+                        thisrace['racecomment'] = lnracecomment
+                        thisrace['distance'] = lndist
+                        thisrace['going'] = lngoing
+                        thisrace['sp'] = lnsp
+                        thisrace['gear'] = lngear
+                        previousraces[lnraceid] = thisrace
+                        hl.add_value('previousraces', previousraces)
+                    if lnpos == '1':
+                        nowins = nowins+1
+
+
+
+                    # lnjname = " ".join(tr.response("a[contains(@href, 'jockey_id')]/text()").extract())
+                    # lnjid_ = tr.response("a[contains(@href, 'jockey_id')]/@href").extract()
+                    # if re.match(jockey_pat, lnjid_):
+                    #     lnjid = re.match(jockey_pat, lnjid_).group(1)
+                    # lnjid = None
+                    #this will be the raceids dict of dictionaries
+                    # print ("lnracedate, lnpos, lnrc, dist, going, raceclass, racetype, lnrunners, lnsp, lnjid",
+                    # lnracedate, lnpos, lnrc,lndist,lngoing,lnraceclass,lnracetype, lnrunners, lnsp, lnjid)
+                    # print("------comment-------\n")
+                    # print (lnracecomment)
                     ###LTO
                     if ln == 1:
                         l.add_value('l1pos', lnpos)
