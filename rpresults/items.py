@@ -42,6 +42,8 @@ class TrainerItem(scrapy.Item):
 
 class RaceItem(scrapy.Item):
     venue = scrapy.Field()
+    venueid = scrapy.Field()
+
     raceid = scrapy.Field()
     raceurl = scrapy.Field()
     racedate= scrapy.Field()

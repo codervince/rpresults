@@ -15,3 +15,9 @@ NEWSPIDER_MODULE = 'rpresults.spiders'
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'rpresults (+http://www.yourdomain.com)'
+
+ITEM_PIPELINES = {
+    'rpresults.pipelines.MongodbExportPipeline': 1
+}
+
+MONGO_DBNAME = 'rpresults'

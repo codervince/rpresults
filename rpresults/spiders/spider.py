@@ -532,6 +532,7 @@ class RpostSpider(scrapy.Spider):
                 t = TrainerItemLoader(item=TrainerItem(), response=response)
 
                 v.add_value('venueid', racecourseid)
+                r.add_value('venueid', racecourseid)
                 v.add_value('name', racecoursename)
                 # l.add_value('racetitle', racetitle)
 
