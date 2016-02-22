@@ -8,7 +8,7 @@ from scrapy.http import Request
 from scrapy import log
 import decimal
 from .. import items
-from rpresults.items import ResultsItem,HorseItem, JockeyItem, TrainerItem, LTOItem, NTOItem, VenueItem, RaceItem
+from rpresults.items import ResultsItem,HorseItem, JockeyItem, TrainerItem, LTOItem, NTOItem, VenueItem, RaceItem, RacedayItem,OwnerItem
 from datetime import datetime
 import pprint
 import logging
@@ -90,16 +90,20 @@ def isthis(racename, rtype):
     return (rtype in racename.lower())
 
 #7,751.94
+
 def getprizemoney(moneyvalue):
     from decimal import Decimal
     if type(moneyvalue) == type([]):
         moneyvalue = moneyvalue[0]
     #replace non money chars
+    prizemoneys = {}
     if " " in moneyvalue:
-        moneyvalue = moneyvalue.split(" ")[0]
+        moneyvalue = moneyvalue.split(" ")
+        for i, m in enumerate(moneyvalue):
+            m_ = try_float(m.replace(",", ""))
+            prizemoneys[str(i+1)] = round(decimal.Decimal(m_),2)
     # ''.join( ''.join([ i for i in L1distgoing if not i.isdigit() ]))
-    newmoney = try_float(moneyvalue.replace(",", ""))
-    return round(decimal.Decimal(newmoney),2)
+    return prizemoneys
 
 def horselengthprocessor(value):
     #covers '' and '-'
@@ -258,7 +262,9 @@ def tf(values, encoding="utf-8"):
             break
     return value.encode(encoding).strip()
 
-
+def cleanstring(s):
+    pattern = re.compile(r'\s+')
+    return re.sub(pattern, u' ',s).sub(u'-', u'').sub(u'\n', u'')
 
 def clean_lbwresult(s):
     if s is None:
@@ -296,16 +302,25 @@ def today():
 todaysdate = datetime.today()
 todaysdatestr = datetime.today().strftime("%Y-%m-%d")
 
+
+class RacedayItemLoader(ItemLoader):
+    default_item_class = RacedayItem
+    default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
+
 class LTOItemLoader(ItemLoader):
-    default_item_class = HorseItem
+    default_item_class = RaceItem
     default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
 
 class NTOItemLoader(ItemLoader):
-    default_item_class = HorseItem
+    default_item_class = RaceItem
     default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
 
 class VenueItemLoader(ItemLoader):
-    default_item_class = HorseItem
+    default_item_class = VenueItem
+    default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
+
+class OwnerItemLoader(ItemLoader):
+    default_item_class = OwnerItem
     default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
 
 class JockeyItemLoader(ItemLoader):
@@ -319,11 +334,16 @@ class TrainerItemLoader(ItemLoader):
 class HorseItemLoader(ItemLoader):
     default_item_class = HorseItem
     default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
+    owner_in = Identity()
+    owner_out= Identity()
 
 class RaceItemLoader(ItemLoader):
     default_item_class = RaceItem
     default_output_processor = Compose(TakeFirst(), unicode, unicode.strip)
-
+    # venueid_out = Compose(TakeFirst(), try_int)
+    # venue_out = Identity()
+    # venue_out = Compose(TakeFirst(), Identity())
+    # venue_in = Compose(TakeFirst(), Identity())
 
 # from rpost.items import RpostResultsItem
 class ResultsItemLoader(ItemLoader):
@@ -362,6 +382,8 @@ class ResultsItemLoader(ItemLoader):
     currentodds_out = Compose(default_output_processor, decimalizeodds)
     horse_out = Compose(TakeFirst(), Identity())
     horse_in = Compose(TakeFirst(), Identity())
+    allowners_in = Identity()
+    allowners_out = Identity()
 
 
 class RpostSpider(scrapy.Spider):
@@ -378,7 +400,8 @@ class RpostSpider(scrapy.Spider):
         self.forbiddencountries = ['NZ', 'AUS']
         self.AUScourseids = [980,1022,629,311,821,517,480,471]
         self.todaysvenues = {}
-        self.racedate = datetime.utcnow().date() #are you sure?
+        # self.racedate = datetime.utcnow().date() #are you sure?
+        self.racedate = None
         if filename:
             with open(filename, 'r') as f:
                 self.start_urls = [ self.start_url % (x.strip()) for x in f.readlines()]
@@ -402,14 +425,23 @@ class RpostSpider(scrapy.Spider):
         else:
             #raceday item? u'Trentham (NZ) Result 17 Jan 2015'
             title = response.xpath('//title').extract()[0]
-            todayscourses = response.xpath("//h3//a[contains(@title, 'Course')]//@href").extract()
+            # todayscourses = response.xpath("//h3//a[contains(@title, 'Course')]//@href").extract()
+            todayscourses = response.xpath("//a[not(contains(@class,'false')) and contains(@href, 'crs_id') and contains(@href, 'course_home') and text()]/@href").extract()
             # l.add_value('rpraceid',  re.match(r'.*race_id=(\d+).*', response.url).group(1))
-            todaysnames = response.xpath("//h3//a[contains(@title, 'Course')]//text()").extract()
+            todaysnames = response.xpath("//a[not(contains(@class,'false')) and contains(@href, 'crs_id') and contains(@href, 'course_home') and text()]/text()").extract()
+            # todaysnames = response.xpath("//h3//a[contains(@title, 'Course')]//text()").extract()
             todaysdate = response.url.split("=")[1]
             # print todaysdate
             self.racedate = datetime.strptime(todaysdate, '%Y-%m-%d').date() #2016-02-06
             crsid = None
+            meets = len(todayscourses)
 
+            ###Raceday INIT
+            rd = RacedayItemLoader(item=RacedayItem(), response=response)
+            rd.add_value("meets", meets)
+            rd.add_value("todaysdate", todaysdate)
+            rditem = rd.load_item()
+            #################
 
             for n,l in zip(todaysnames, todayscourses):
                 if re.match(racecourseid_pat, l):
@@ -425,9 +457,15 @@ class RpostSpider(scrapy.Spider):
             # if crsid in self.AUScourseids:
             #     yield Request(response.url, dont_filter=True)
             # else:
-            thisrcpath = " ".join(response.xpath("//a[contains(text(), '(AUS)')]/text()").extract())
-            print("--------\n")
-            print(thisrcpath)
+            # thisrcpath = " ".join(response.xpath("//a[contains(text(), '(AUS)')]/text()").extract())
+            # print("--------\n")
+            # print(thisrcpath)
+            # approved_links = response.xpath("//a[not(contains(@class,'false')) and contains(@href, 'crs_id') and contains(@href, 'course_home') and text()]/../../../../../../../div[@class='crBlock']/table[@class='cardsGrid']/tbody/tr/td[3]/a/@href").extract()
+            # print("Approved links", approved_links)
+            # for link in approved_links:
+            #     yield Request(link, callback=self.parse_race, meta= { 'raceday': rditem})
+
+
             for link in LinkExtractor(
                 restrict_xpaths=([
                 "//a[contains(@title,'View full result')]",
@@ -437,7 +475,7 @@ class RpostSpider(scrapy.Spider):
                  ] )
                 ).extract_links(response)[:-1]:
                     # yield Request(link.url)
-                yield Request(link.url, callback=self.parse_race)
+                yield Request(link.url, callback=self.parse_race, meta= { 'raceday': rditem})
 
 
     def parse_race(self, response):
@@ -462,6 +500,13 @@ class RpostSpider(scrapy.Spider):
             #class rating agegroup distance going
             prizemoneys_ = " ".join(response.xpath("//div[@class='leftColBig']/ul/li[2]/text()").extract())
             prizemoneys = removeunichars(prizemoneys_)
+            posprizemoneys = {}
+            posprizemoneys= getprizemoney(prizemoneys)
+            print("getprizemoney(prizemoneys)", posprizemoneys)
+            winningprize = None
+            if posprizemoneys != {}:
+                winningprize = posprizemoneys['1']
+
 
             #tipster success?
             tippedby = None
@@ -531,11 +576,17 @@ class RpostSpider(scrapy.Spider):
                 j = JockeyItemLoader(item=JockeyItem(), response=response)
                 t = TrainerItemLoader(item=TrainerItem(), response=response)
 
-                v.add_value('venueid', racecourseid)
-                r.add_value('venueid', racecourseid)
+                #the venue fix
+                venid_ = int(racecourseid) or 99999
+                ##VENUE
+                v.add_value('venueid', venid_)
                 v.add_value('name', racecoursename)
-                # l.add_value('racetitle', racetitle)
+                #add to race
+                vitem = v.load_item()
+                print("vloaditem()", vitem)
 
+                r.add_value('venue', vitem)
+                r.add_value('venueid', venid_)
                 ### RACEITEM
 
                 r.add_value('raceid', raceid)
@@ -545,7 +596,7 @@ class RpostSpider(scrapy.Spider):
                 r.add_value('racename', racename)
                 r.add_value('raceid', raceid)
                 r.add_value('prizemoneys', prizemoneys)
-                r.add_value('winningprize', getprizemoney(prizemoneys))
+                r.add_value('winningprize', winningprize)
                 r.add_value('racetime', racetime)
                 r.add_value('norunners', norunners)
                 r.add_value('winninghorse', winninghorse)
@@ -627,17 +678,23 @@ class RpostSpider(scrapy.Spider):
 
                 raceComments = " ".join(tr.xpath("../tr[@class='rowComment']//td//text()").extract()).strip()
                 l.add_value('raceComments', raceComments)
-                l.add_value('pos', pos)
+                l.add_value('FINALPOS', pos.strip())
+                if posprizemoneys != {}:
+                    try:
+                        posprize = posprizemoneys[pos.strip()]
+                    except KeyError:
+                        posprize= 0.0
+                    l.add_value('horseprize', posprize)
                 l.add_value('draw', draw)
                 if pos == '1':
                     l.add_value('lbw', winninglbw)
                 else:
                     l.add_value('lbw', lbw)
-                l.add_value('sp', try_float(sp))
+                l.add_value('SP', try_float(sp))
                 try:
                     hdx = hcodelist.index(horseid)
                     # print("---->", horseid)
-                    l.add_value('winoddsrank', oddsranks[hdx])
+                    l.add_value('winoddsrank', int(oddsranks[hdx]))
                 except IndexError:
                     l.add_value('winoddsrank', None)
 
@@ -661,12 +718,14 @@ class RpostSpider(scrapy.Spider):
 
             ###NESTED
                 ra_item = r.load_item()
-                ra_item['venue'] = v.load_item()
+                # ra_item['venue'] = v.load_item()
                 l_item = l.load_item()
                 l_item['race'] = ra_item
                 l_item['jockey'] = j.load_item()
                 l_item['trainer'] = t.load_item()
-                l_item['prevnextrace'] = [ lto.load_item(), nto.load_item() ]
+                l_item['prevrace'] = lto.load_item()
+                l_item['nextrace'] = nto.load_item()
+
 
                 # table_data.append(i)
                 # yield i
@@ -683,10 +742,6 @@ class RpostSpider(scrapy.Spider):
                     )
     #USE EXACT SAME CODE FOR RACEDAY
     '''
-    Get metadata about horse
-    do AGGREGATE ON FLY
-    need todays INFO
-    #RACEDAY MAY HAVE EXISTING RACES
     '''
     def parse_horse(self, response):
         ## TOTAL EARNINGS EPS_CODE EPS_TOTAL
@@ -702,10 +757,22 @@ class RpostSpider(scrapy.Spider):
 
         #now HorseItem
         hl = HorseItemLoader(item=HorseItem(), response=response)
+        ol = OwnerItemLoader(item=OwnerItem(), response=response)
         owners_ = ";".join( response.xpath("//ul[@id='detailedInfo']/li[contains(text(), 'Owner')]/b//text()").extract())
         owners = tf(owners_.strip().split(";"))
-        hl.add_value("owners", owners)
-
+        myowners = list()
+        for o in owners_.strip().split(";"):
+            if o in [u'', u'\n ',u' ']:
+                continue
+            print("owners: ", o)
+            ol.add_value("ownername", o)
+            myowners.append(o.strip())
+        if myowners != []:
+            l.add_value("allowners",myowners)
+            print(l.get_value('trainer')[1])
+            l.add_value("currentowner",myowners[0])
+            l.add_value("ownertrainer",myowners[0]==l.get_value('trainer')[1])
+        hl.add_value("horsename", l.get_collected_values('horsename'))
         ##trainers
         trainers_ = ";".join( response.xpath("//ul[@id='detailedInfo']/li[contains(text(), 'Trainer')]/div//text()").extract())
         trainers= tf(trainers_.strip().split(";"))
@@ -779,7 +846,10 @@ class RpostSpider(scrapy.Spider):
                     l.add_value('isFROY', isFROY( (self.racedate- lnracedate).days))
                     ln = ln+1
                     lnracehref = tr.xpath("td[1]/a/@href").extract()[0]
-                    lnrc = tr.xpath("td[2]/b/a/text()").extract()[0]
+                    try:
+                        lnrc = tr.xpath("td[2]/b/a/text()").extract()[0]
+                    except IndexError:
+                        lnrc = None
                     lndistancegoing= " ".join(tr.xpath("td[2]/b/text()").extract()).strip()
                     lnraceconditions=  " ".join(tr.xpath("td[2]/text()").extract()).strip()
                     lnspgear = " ".join(tr.xpath("td[4]/a/following-sibling::text()").extract()).strip()
@@ -831,7 +901,7 @@ class RpostSpider(scrapy.Spider):
                         thisrace['sp'] = lnsp
                         thisrace['gear'] = lngear
                         previousraces[lnraceid] = thisrace
-                        hl.add_value('previousraces', previousraces)
+                        l.add_value('previousraces', previousraces)
                     if lnpos == '1':
                         nowins = nowins+1
 
@@ -858,5 +928,6 @@ class RpostSpider(scrapy.Spider):
         l.add_value('previousstarts', ln)
         l.add_value('isMaiden', (nowins>0))
         l.add_value('horse', hl.load_item() )
+        # l.add_value('owner', ol.load_item() )
         # yield hl.load_item()
         yield l.load_item()

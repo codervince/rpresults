@@ -16,8 +16,11 @@ NEWSPIDER_MODULE = 'rpresults.spiders'
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'rpresults (+http://www.yourdomain.com)'
 
+USER_AGENT = "Googlebot/2.1 ( http://www.google.com/bot.html)"
 ITEM_PIPELINES = {
     'rpresults.pipelines.MongodbExportPipeline': 1
 }
 
 MONGO_DBNAME = 'rpresults'
+
+TELNETCONSOLE_PORT = None
