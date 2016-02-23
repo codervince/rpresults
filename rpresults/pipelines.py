@@ -76,12 +76,14 @@ class MongodbExportPipeline(object):
         )
 
         race = d.pop('race')  # raceid
-        race_venue = race.pop('venue')  # venueid
-        self.db.venues.update_one(
-            {'venueid': race_venue['venueid']},
-            {'$set': race_venue},
-            upsert=True
-        )
+        # race_venue = race.pop('venue')  # venueid
+        # print("venue in pipeline:", race_venue)
+        # self.db.venues.update_one(
+        #     {'venueid': race_venue['venueid']},
+        #     {'$set': race_venue},
+        #     upsert=True
+        # )
+
         self.db.races.update_one(
             {'raceid': race['raceid']},
             {'$set': race},

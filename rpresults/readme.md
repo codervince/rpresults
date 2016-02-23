@@ -4,12 +4,23 @@ errors
 
 venueid
 dates to date objects
+BSON:
+new Date('Jun 23, 1912')
 
 #TODOs
 racetime to time timezone
 
 add dates to previous racedates do race like objects in dictionary
 
+need data before can do mango db stuff
+
+
+AGGREGATION
+
+in RU snapshot of h performance at this time
+horse_stats:  { 'wins', 'runs', ''  }
+
+race
 
 
 
