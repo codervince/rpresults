@@ -27,29 +27,9 @@ class MongodbExportPipeline(object):
         self.mongo = pymongo.MongoClient()
         self.db = self.mongo[self.db_name]
 
-        # Create indexes
+        # Create index
         self.db.results.create_index([
             ("raceid", pymongo.ASCENDING),
-            ("horseid", pymongo.ASCENDING)
-        ], unique=True)
-
-        self.db.trainers.create_index([
-            ("trainerid", pymongo.ASCENDING)
-        ], unique=True)
-
-        self.db.jockeys.create_index([
-            ("jockeyid", pymongo.ASCENDING)
-        ], unique=True)
-
-        self.db.venues.create_index([
-            ("venueid", pymongo.ASCENDING)
-        ], unique=True)
-
-        self.db.races.create_index([
-            ("raceid", pymongo.ASCENDING)
-        ], unique=True)
-
-        self.db.horses.create_index([
             ("horseid", pymongo.ASCENDING)
         ], unique=True)
 
@@ -57,49 +37,33 @@ class MongodbExportPipeline(object):
         self.mongo.close()
 
     def process_item(self, item, spider):
-        d = dict(item)  # raceid + horseid
+        d = dict(item)
 
         # logger.info(d)
 
-        trainer = d.pop('trainer')  # trainerid
-        self.db.trainers.update_one(
-            {'trainerid': trainer['trainerid']},
-            {'$set': trainer},
-            upsert=True
-        )
-
-        jockey = d.pop('jockey')  # jockeyid
-        self.db.jockeys.update_one(
-            {'jockeyid': jockey['jockeyid']},
-            {'$set': jockey},
-            upsert=True
-        )
-
-        race = d.pop('race')  # raceid
-        # race_venue = race.pop('venue')  # venueid
-        # print("venue in pipeline:", race_venue)
-        # self.db.venues.update_one(
-        #     {'venueid': race_venue['venueid']},
-        #     {'$set': race_venue},
-        #     upsert=True
-        # )
-
-        self.db.races.update_one(
-            {'raceid': race['raceid']},
-            {'$set': race},
-            upsert=True
-        )
-
-        horse = d.pop('horse')  # horseid
-        self.db.horses.update_one(
-            {'horseid': horse['horseid']},
-            {'$set': horse},
-            upsert=True
-        )
-
+        # Update result object
         self.db.results.update_one(
             {'raceid': d['raceid'], 'horseid': d['horseid']},
             {'$set': d},
             upsert=True
         )
+
+        # Update 'race' field
+        self.db.results.update_many(
+            {'raceid': d['raceid']},
+            {'$set': {'race': d['race']}}
+        )
+
+        # Update 'prevrace' field
+        self.db.results.update_many(
+            {'prevrace.raceid': d['raceid']},
+            {'$set': {'prevrace': d['race']}}
+        )
+
+        # Update 'nextrace' field
+        self.db.results.update_many(
+            {'nextrace.raceid': d['raceid']},
+            {'$set': {'nextrace': d['race']}}
+        )
+
         return item
